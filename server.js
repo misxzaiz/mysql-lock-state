@@ -376,59 +376,115 @@ app.get('/api/locks', async (req, res) => {
       lockRange: parseLockRange(lock)
     }));
 
-    // 查询锁等待信息 - MySQL 8.0+ 使用 performance_schema.data_lock_waits
-    // 先检查表结构，然后查询实际存在的字段
-    const [lockWaits] = await connection.execute(`
-      SELECT * FROM performance_schema.data_lock_waits LIMIT 1
-    `);
-
-    // 如果表为空或字段不存在，使用简化查询
-    let finalLockWaits = lockWaits;
-    if (lockWaits.length === 0) {
-      // 尝试查询可能存在的字段组合
+    // 查询锁等待信息 - 先尝试使用 data_lock_waits 表
+    let finalLockWaits = [];
+    try {
+      // 检查 data_lock_waits 表是否存在并有数据
+      const [lockWaits] = await connection.execute(`
+        SELECT 
+          REQUESTING_ENGINE_TRANSACTION_ID,
+          REQUESTING_THREAD_ID,
+          REQUESTING_EVENT_ID,
+          REQUESTING_LOCK_ID,
+          BLOCKING_ENGINE_TRANSACTION_ID,
+          BLOCKING_THREAD_ID,
+          BLOCKING_EVENT_ID,
+          BLOCKING_LOCK_ID
+        FROM performance_schema.data_lock_waits
+      `);
+      finalLockWaits = lockWaits;
+    } catch (waitError) {
+      console.log('data_lock_waits 表查询失败，使用替代方案:', waitError.message);
+      
+      // 替代方案：通过分析锁状态识别等待关系
       try {
-        const [alternativeWaits] = await connection.execute(`
+        // 查询处于等待状态的锁，并尝试找到阻塞的锁
+        const [waitingLocks] = await connection.execute(`
           SELECT 
-            ENGINE_TRANSACTION_ID AS REQUESTING_ENGINE_TRANSACTION_ID,
-            THREAD_ID AS REQUESTING_THREAD_ID,
-            EVENT_ID AS REQUESTING_EVENT_ID,
-            OBJECT_NAME AS REQUESTING_LOCK_ID,
-            'UNKNOWN' AS BLOCKING_ENGINE_TRANSACTION_ID,
-            0 AS BLOCKING_THREAD_ID,
-            0 AS BLOCKING_EVENT_ID,
-            'UNKNOWN' AS BLOCKING_LOCK_ID
-          FROM performance_schema.data_locks 
-          WHERE LOCK_STATUS = 'WAITING'
-          LIMIT 10
+            w.ENGINE_TRANSACTION_ID AS REQUESTING_ENGINE_TRANSACTION_ID,
+            w.THREAD_ID AS REQUESTING_THREAD_ID,
+            w.EVENT_ID AS REQUESTING_EVENT_ID,
+            CONCAT(w.OBJECT_SCHEMA, '.', w.OBJECT_NAME, ':', w.LOCK_DATA) AS REQUESTING_LOCK_ID,
+            b.ENGINE_TRANSACTION_ID AS BLOCKING_ENGINE_TRANSACTION_ID,
+            b.THREAD_ID AS BLOCKING_THREAD_ID,
+            b.EVENT_ID AS BLOCKING_EVENT_ID,
+            CONCAT(b.OBJECT_SCHEMA, '.', b.OBJECT_NAME, ':', b.LOCK_DATA) AS BLOCKING_LOCK_ID
+          FROM performance_schema.data_locks w
+          JOIN performance_schema.data_locks b ON (
+            w.OBJECT_SCHEMA = b.OBJECT_SCHEMA 
+            AND w.OBJECT_NAME = b.OBJECT_NAME
+            AND w.INDEX_NAME = b.INDEX_NAME
+            AND w.LOCK_DATA = b.LOCK_DATA
+            AND w.ENGINE_TRANSACTION_ID != b.ENGINE_TRANSACTION_ID
+            AND w.LOCK_STATUS = 'WAITING'
+            AND b.LOCK_STATUS = 'GRANTED'
+          )
+          ORDER BY w.ENGINE_TRANSACTION_ID
         `);
-        finalLockWaits = alternativeWaits;
+        finalLockWaits = waitingLocks;
       } catch (altError) {
-        console.log('使用备用查询方式:', altError.message);
+        console.log('替代查询也失败:', altError.message);
         finalLockWaits = [];
       }
     }
 
-    // 查询进程信息
+    // 查询进程信息，包含锁占用时间
     const [processList] = await connection.execute(`
       SELECT 
-        ID,
-        USER,
-        HOST,
-        DB,
-        COMMAND,
-        TIME,
-        STATE,
-        INFO
-      FROM information_schema.PROCESSLIST
-      WHERE COMMAND != 'Sleep'
+        p.ID,
+        p.USER,
+        p.HOST,
+        p.DB,
+        p.COMMAND,
+        p.TIME,
+        p.STATE,
+        p.INFO,
+        IFNULL(t.PROCESSLIST_TIME, p.TIME) as PROCESSLIST_TIME
+      FROM information_schema.PROCESSLIST p
+      LEFT JOIN performance_schema.threads t ON p.ID = t.PROCESSLIST_ID
+      WHERE p.COMMAND != 'Sleep'
     `);
+
+    // 查询事务信息，获取锁占用时间
+    const [transactions] = await connection.execute(`
+      SELECT 
+        TRX_ID,
+        TRX_MYSQL_THREAD_ID,
+        TRX_STARTED,
+        TIMESTAMPDIFF(SECOND, TRX_STARTED, NOW()) as TRX_DURATION,
+        TRX_STATE,
+        TRX_REQUESTED_LOCK_ID,
+        TRX_WAIT_STARTED
+      FROM information_schema.INNODB_TRX
+    `);
+
+    // 为锁信息添加时间数据
+    const enhancedLocksWithTime = enhancedLocks.map(lock => {
+      const transaction = transactions.find(t => t.TRX_MYSQL_THREAD_ID == lock.THREAD_ID);
+      const process = processList.find(p => p.ID == getProcesslistId(lock.THREAD_ID, processList));
+      
+      return {
+        ...lock,
+        lockDuration: transaction ? transaction.TRX_DURATION : (process ? process.TIME : 0),
+        trxStarted: transaction ? transaction.TRX_STARTED : null,
+        trxState: transaction ? transaction.TRX_STATE : null,
+        processTime: process ? process.TIME : 0
+      };
+    });
+
+    // 辅助函数：根据THREAD_ID获取PROCESSLIST_ID
+    function getProcesslistId(threadId, processList) {
+      const process = processList.find(p => p.THREAD_ID == threadId);
+      return process ? process.ID : null;
+    }
 
     connection.release();
     
     res.json({
-      locks: enhancedLocks,
+      locks: enhancedLocksWithTime,
       lockWaits: finalLockWaits,
       processList,
+      transactions,
       timestamp: new Date().toISOString()
     });
     
