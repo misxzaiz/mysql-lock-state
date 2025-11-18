@@ -385,17 +385,21 @@ app.get('/api/locks', async (req, res) => {
     // 查询锁等待信息 - 先尝试使用 data_lock_waits 表
     let finalLockWaits = [];
     try {
-      // 检查 data_lock_waits 表是否存在并有数据
+      // 先检查表结构
+      const [columns] = await connection.execute(`
+        SHOW COLUMNS FROM performance_schema.data_lock_waits
+      `);
+      console.log('data_lock_waits 表字段:', columns.map(c => c.Field));
+      
+      // 根据实际字段构建查询
       const [lockWaits] = await connection.execute(`
         SELECT 
           REQUESTING_ENGINE_TRANSACTION_ID,
           REQUESTING_THREAD_ID,
           REQUESTING_EVENT_ID,
-          REQUESTING_LOCK_ID,
           BLOCKING_ENGINE_TRANSACTION_ID,
           BLOCKING_THREAD_ID,
-          BLOCKING_EVENT_ID,
-          BLOCKING_LOCK_ID
+          BLOCKING_EVENT_ID
         FROM performance_schema.data_lock_waits
       `);
       finalLockWaits = lockWaits;
@@ -410,17 +414,17 @@ app.get('/api/locks', async (req, res) => {
             w.ENGINE_TRANSACTION_ID AS REQUESTING_ENGINE_TRANSACTION_ID,
             w.THREAD_ID AS REQUESTING_THREAD_ID,
             w.EVENT_ID AS REQUESTING_EVENT_ID,
-            CONCAT(w.OBJECT_SCHEMA, '.', w.OBJECT_NAME, ':', w.LOCK_DATA) AS REQUESTING_LOCK_ID,
+            CONCAT(w.OBJECT_SCHEMA, '.', w.OBJECT_NAME, ':', IFNULL(w.LOCK_DATA, '')) AS REQUESTING_LOCK_ID,
             b.ENGINE_TRANSACTION_ID AS BLOCKING_ENGINE_TRANSACTION_ID,
             b.THREAD_ID AS BLOCKING_THREAD_ID,
             b.EVENT_ID AS BLOCKING_EVENT_ID,
-            CONCAT(b.OBJECT_SCHEMA, '.', b.OBJECT_NAME, ':', b.LOCK_DATA) AS BLOCKING_LOCK_ID
+            CONCAT(b.OBJECT_SCHEMA, '.', b.OBJECT_NAME, ':', IFNULL(b.LOCK_DATA, '')) AS BLOCKING_LOCK_ID
           FROM performance_schema.data_locks w
           JOIN performance_schema.data_locks b ON (
             w.OBJECT_SCHEMA = b.OBJECT_SCHEMA 
             AND w.OBJECT_NAME = b.OBJECT_NAME
-            AND w.INDEX_NAME = b.INDEX_NAME
-            AND w.LOCK_DATA = b.LOCK_DATA
+            AND IFNULL(w.INDEX_NAME, '') = IFNULL(b.INDEX_NAME, '')
+            AND IFNULL(w.LOCK_DATA, '') = IFNULL(b.LOCK_DATA, '')
             AND w.ENGINE_TRANSACTION_ID != b.ENGINE_TRANSACTION_ID
             AND w.LOCK_STATUS = 'WAITING'
             AND b.LOCK_STATUS = 'GRANTED'
@@ -434,7 +438,7 @@ app.get('/api/locks', async (req, res) => {
       }
     }
 
-    // 查询进程信息，包含锁占用时间
+    // 查询进程信息，包含锁占用时间（移除Sleep限制，获取所有进程）
     const [processList] = await connection.execute(`
       SELECT 
         p.ID,
@@ -448,7 +452,6 @@ app.get('/api/locks', async (req, res) => {
         IFNULL(t.PROCESSLIST_TIME, p.TIME) as PROCESSLIST_TIME
       FROM information_schema.PROCESSLIST p
       LEFT JOIN performance_schema.threads t ON p.ID = t.PROCESSLIST_ID
-      WHERE p.COMMAND != 'Sleep'
     `);
 
     // 查询事务信息和线程映射，获取锁占用时间
@@ -474,7 +477,79 @@ app.get('/api/locks', async (req, res) => {
       WHERE PROCESSLIST_ID IS NOT NULL
     `);
 
-    // 为锁信息添加时间数据
+    // 尝试多种方式获取SQL语句
+    let recentSqls = [];
+    let currentSqls = [];
+    
+    // 方法1：使用performance_schema.events_statements_history_long
+    try {
+      const [sqlHistory] = await connection.execute(`
+        SELECT 
+          THREAD_ID,
+          EVENT_ID,
+          TIMER_START,
+          TIMER_END,
+          SQL_TEXT,
+          DIGEST_TEXT,
+          CURRENT_SCHEMA
+        FROM performance_schema.events_statements_history_long
+        WHERE SQL_TEXT IS NOT NULL AND SQL_TEXT != ''
+        ORDER BY TIMER_END DESC
+        LIMIT 1000
+      `);
+      recentSqls = sqlHistory;
+      console.log(`方法1: 查询到 ${sqlHistory.length} 条历史SQL记录`);
+    } catch (sqlError) {
+      console.log('方法1查询SQL历史失败:', sqlError.message);
+      
+      // 方法2：使用information_schema.processlist
+      try {
+        const [processSql] = await connection.execute(`
+          SELECT 
+            ID as THREAD_ID,
+            INFO as SQL_TEXT,
+            DB as CURRENT_SCHEMA,
+            TIME,
+            USER,
+            HOST
+          FROM information_schema.PROCESSLIST
+          WHERE INFO IS NOT NULL AND INFO != '' AND COMMAND != 'Sleep'
+          ORDER BY TIME DESC
+          LIMIT 1000
+        `);
+        recentSqls = processSql.map(row => ({
+          ...row,
+          THREAD_ID: row.THREAD_ID,
+          SQL_TEXT: row.SQL_TEXT,
+          CURRENT_SCHEMA: row.CURRENT_SCHEMA
+        }));
+        console.log(`方法2: 查询到 ${processSql.length} 条进程SQL记录`);
+      } catch (processError) {
+        console.log('方法2查询进程SQL失败:', processError.message);
+      }
+    }
+    
+    // 查询当前正在执行的SQL
+    try {
+      const [currentSql] = await connection.execute(`
+        SELECT 
+          THREAD_ID,
+          EVENT_ID,
+          SQL_TEXT,
+          DIGEST_TEXT,
+          CURRENT_SCHEMA
+        FROM performance_schema.events_statements_current
+        WHERE SQL_TEXT IS NOT NULL AND SQL_TEXT != ''
+        ORDER BY TIMER_START DESC
+        LIMIT 1000
+      `);
+      currentSqls = currentSql;
+      console.log(`查询到 ${currentSql.length} 条当前SQL记录`);
+    } catch (sqlError) {
+      console.log('查询当前SQL失败:', sqlError.message);
+    }
+
+    // 为锁信息添加时间数据和SQL历史
     const enhancedLocksWithTime = enhancedLocks.map(lock => {
       // 通过线程映射找到正确的PROCESSLIST_ID
       const threadMapping = threadMappings.find(t => t.THREAD_ID == lock.THREAD_ID);
@@ -488,6 +563,52 @@ app.get('/api/locks', async (req, res) => {
       const process = processlistId ? 
         processList.find(p => p.ID == processlistId) : null;
 
+      // 查找相关的SQL语句
+      let relatedSqls = [];
+      
+      // 1. 首先查找当前正在执行的SQL
+      const currentThreadSqls = currentSqls.filter(sql => sql.THREAD_ID === lock.THREAD_ID);
+      if (currentThreadSqls.length > 0) {
+        relatedSqls = currentThreadSqls;
+      }
+      
+      // 2. 如果没有当前SQL，查找历史SQL
+      if (relatedSqls.length === 0) {
+        const historyThreadSqls = recentSqls.filter(sql => sql.THREAD_ID === lock.THREAD_ID);
+        if (historyThreadSqls.length > 0) {
+          relatedSqls = historyThreadSqls.slice(0, 5); // 取最近5条
+        }
+      }
+      
+      // 3. 通过事务ID查找SQL（如果事务ID存在）
+      if (relatedSqls.length === 0 && lock.ENGINE_TRANSACTION_ID) {
+        // 通过线程ID关联事务
+        const trxThread = threadMappings.find(t => {
+          const trx = transactions.find(tr => tr.TRX_MYSQL_THREAD_ID === t.PROCESSLIST_ID);
+          return trx && trx.TRX_ID === lock.ENGINE_TRANSACTION_ID;
+        });
+        
+        if (trxThread) {
+          const trxSqls = [...currentSqls, ...recentSqls].filter(sql => sql.THREAD_ID === trxThread.THREAD_ID);
+          if (trxSqls.length > 0) {
+            relatedSqls = trxSqls.slice(0, 5);
+          }
+        }
+      }
+
+      // 格式化SQL信息
+      const sqlInfo = relatedSqls.length > 0 ? {
+        current: relatedSqls[0].SQL_TEXT,
+        digest: relatedSqls[0].DIGEST_TEXT,
+        schema: relatedSqls[0].CURRENT_SCHEMA,
+        history: relatedSqls.map(sql => ({
+          text: sql.SQL_TEXT,
+          digest: sql.DIGEST_TEXT,
+          schema: sql.CURRENT_SCHEMA,
+          timer: sql.TIMER_END
+        }))
+      } : null;
+
       return {
         ...lock,
         processlistId: processlistId,
@@ -497,10 +618,11 @@ app.get('/api/locks', async (req, res) => {
         processTime: process ? process.TIME : 0,
         hasTransaction: !!transaction,
         threadMapping: !!threadMapping,
-        sql: process ? process.INFO : null,  // 添加执行的SQL语句
+        sql: process ? process.INFO : (sqlInfo ? sqlInfo.current : null),  // 优先使用当前进程的SQL，然后是历史SQL
+        sqlInfo: sqlInfo,  // 保存完整的SQL信息
         user: process ? process.USER : null, // 添加用户信息
         host: process ? process.HOST : null, // 添加主机信息
-        db: process ? process.DB : null, // 添加数据库信息
+        db: process ? process.DB : (sqlInfo ? sqlInfo.schema : null), // 优先使用进程DB，然后是SQL schema
         command: process ? process.COMMAND : null, // 添加命令类型
         state: process ? process.STATE : null // 添加进程状态
       };
