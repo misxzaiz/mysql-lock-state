@@ -445,7 +445,7 @@ app.get('/api/locks', async (req, res) => {
       WHERE p.COMMAND != 'Sleep'
     `);
 
-    // 查询事务信息，获取锁占用时间
+    // 查询事务信息和线程映射，获取锁占用时间
     const [transactions] = await connection.execute(`
       SELECT 
         TRX_ID,
@@ -458,25 +458,41 @@ app.get('/api/locks', async (req, res) => {
       FROM information_schema.INNODB_TRX
     `);
 
+    // 查询线程映射关系
+    const [threadMappings] = await connection.execute(`
+      SELECT 
+        THREAD_ID,
+        PROCESSLIST_ID,
+        NAME
+      FROM performance_schema.threads
+      WHERE PROCESSLIST_ID IS NOT NULL
+    `);
+
     // 为锁信息添加时间数据
     const enhancedLocksWithTime = enhancedLocks.map(lock => {
-      const transaction = transactions.find(t => t.TRX_MYSQL_THREAD_ID == lock.THREAD_ID);
-      const process = processList.find(p => p.ID == getProcesslistId(lock.THREAD_ID, processList));
+      // 通过线程映射找到正确的PROCESSLIST_ID
+      const threadMapping = threadMappings.find(t => t.THREAD_ID == lock.THREAD_ID);
+      const processlistId = threadMapping ? threadMapping.PROCESSLIST_ID : null;
       
+      // 通过PROCESSLIST_ID找到事务
+      const transaction = processlistId ? 
+        transactions.find(t => t.TRX_MYSQL_THREAD_ID == processlistId) : null;
+      
+      // 通过PROCESSLIST_ID找到进程信息
+      const process = processlistId ? 
+        processList.find(p => p.ID == processlistId) : null;
+
       return {
         ...lock,
+        processlistId: processlistId,
         lockDuration: transaction ? transaction.TRX_DURATION : (process ? process.TIME : 0),
         trxStarted: transaction ? transaction.TRX_STARTED : null,
         trxState: transaction ? transaction.TRX_STATE : null,
-        processTime: process ? process.TIME : 0
+        processTime: process ? process.TIME : 0,
+        hasTransaction: !!transaction,
+        threadMapping: !!threadMapping
       };
     });
-
-    // 辅助函数：根据THREAD_ID获取PROCESSLIST_ID
-    function getProcesslistId(threadId, processList) {
-      const process = processList.find(p => p.THREAD_ID == threadId);
-      return process ? process.ID : null;
-    }
 
     connection.release();
     
