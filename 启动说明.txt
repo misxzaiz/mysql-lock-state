@@ -1,0 +1,18 @@
+MySQL锁可视化工具 - 使用说明
+
+📦 打包完成！exe文件已生成：mysql-lock-visualizer.exe
+
+🚀 使用方法：
+1. 将 mysql-lock-visualizer.exe 和 public 文件夹 放在同一目录
+2. 双击 mysql-lock-visualizer.exe 启动
+3. 浏览器访问：http://localhost:3000
+
+⚠️ 重要提示：
+- exe文件必须与public文件夹在同一目录才能正常运行
+- 确保MySQL服务已启动
+- 确保有MySQL数据库的访问权限
+
+🔧 如果遇到问题：
+- 检查public文件夹是否存在
+- 检查MySQL连接配置
+- 确保3000端口未被占用

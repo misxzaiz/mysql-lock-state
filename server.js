@@ -5,11 +5,17 @@ const path = require('path');
 const app = express();
 const PORT = 3000;
 
+// 兼容exe环境的public目录路径
+const isExe = process.pkg && process.execPath && process.execPath.endsWith('.exe');
+const publicPath = isExe ? 
+  path.join(path.dirname(process.execPath), 'public') : 
+  path.join(__dirname, 'public');
+
 // 连接池管理
 const connectionPools = new Map();
 
 // 静态文件服务
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(publicPath));
 app.use(express.json());
 
 // 生成唯一连接ID
@@ -515,7 +521,7 @@ app.get('/api/locks', async (req, res) => {
 
 // 主页路由
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(publicPath, 'index.html'));
 });
 
 // 定期清理未使用的连接
