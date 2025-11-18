@@ -776,6 +776,19 @@
             </div>
         </div>
         
+        <!-- 锁详情弹窗 -->
+        <div class="modal" id="lockDetailModal">
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h3 class="modal-title">锁详情</h3>
+                    <button class="close-btn" id="closeDetailModal">&times;</button>
+                </div>
+                <div id="lockDetailContent" style="font-family: 'Courier New', monospace; font-size: 13px;">
+                    <!-- 详情内容将在这里显示 -->
+                </div>
+            </div>
+        </div>
+        
         <div class="status-bar">
             <div class="status-indicator">
                 <div class="status-dot" id="statusDot"></div>
@@ -1577,6 +1590,7 @@
                 <td><span class="description">${range.description}</span></td>
                 <td><span class="lock-duration ${durationClass}">${durationText}</span></td>
                 <td class="action-cell">
+                    <button class="btn btn-secondary btn-sm" onclick="showLockDetail('${lock.ENGINE_TRANSACTION_ID || ''}', '${lock.THREAD_ID}', '${encodeURIComponent(JSON.stringify(lock).replace(/'/g, "'"))}')">详情</button>
                     <button class="btn btn-danger btn-sm" onclick="killLock('${lock.THREAD_ID}')">释放</button>
                 </td>
             `;
@@ -1713,6 +1727,105 @@
             
             return chains;
         }
+        
+        // 显示锁详情
+        function showLockDetail(transactionId, threadId, lockDataStr) {
+            try {
+                const lockData = JSON.parse(decodeURIComponent(lockDataStr));
+                const modal = document.getElementById('lockDetailModal');
+                const content = document.getElementById('lockDetailContent');
+                
+                // 格式化锁详情
+                const detailHtml = `
+                    <div style="display: grid; grid-template-columns: 120px 1fr; gap: 12px; margin-bottom: 20px;">
+                        <div style="font-weight: bold; color: #2c3e50;">事务ID:</div>
+                        <div>${lockData.ENGINE_TRANSACTION_ID || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">线程ID:</div>
+                        <div>${lockData.THREAD_ID}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">进程ID:</div>
+                        <div>${lockData.processlistId || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">引擎:</div>
+                        <div>${lockData.ENGINE || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">对象:</div>
+                        <div>${lockData.OBJECT_SCHEMA}.${lockData.OBJECT_NAME}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">索引:</div>
+                        <div>${lockData.INDEX_NAME || '-'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">锁类型:</div>
+                        <div>${lockData.LOCK_TYPE}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">锁模式:</div>
+                        <div>${lockData.LOCK_MODE}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">锁状态:</div>
+                        <div><span class="lock-status ${lockData.LOCK_STATUS.toLowerCase() === 'granted' ? 'granted' : 'waiting'}">${lockData.LOCK_STATUS}</span></div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">锁数据:</div>
+                        <div style="word-break: break-all;">${lockData.LOCK_DATA || '-'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">占用时间:</div>
+                        <div>${formatDuration(lockData.lockDuration || 0)}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">事务开始时间:</div>
+                        <div>${lockData.trxStarted || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">事务状态:</div>
+                        <div>${lockData.trxState || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">用户:</div>
+                        <div>${lockData.user || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">主机:</div>
+                        <div>${lockData.host || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">数据库:</div>
+                        <div>${lockData.db || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">命令:</div>
+                        <div>${lockData.command || 'N/A'}</div>
+                        
+                        <div style="font-weight: bold; color: #2c3e50;">进程状态:</div>
+                        <div>${lockData.state || 'N/A'}</div>
+                    </div>
+                    
+                    ${lockData.sql ? `
+                    <div style="margin-top: 20px;">
+                        <div style="font-weight: bold; color: #2c3e50; margin-bottom: 8px;">执行的SQL语句:</div>
+                        <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #e9ecef; white-space: pre-wrap; word-break: break-all;">${lockData.sql}</div>
+                    </div>
+                    ` : ''}
+                    
+                    <div style="margin-top: 20px;">
+                        <div style="font-weight: bold; color: #2c3e50; margin-bottom: 8px;">原始锁信息:</div>
+                        <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #e9ecef; white-space: pre-wrap; font-size: 11px;">${JSON.stringify(lockData, null, 2)}</div>
+                    </div>
+                `;
+                
+                content.innerHTML = detailHtml;
+                modal.style.display = 'flex';
+                
+            } catch (error) {
+                console.error('显示锁详情失败:', error);
+                showAlert('显示锁详情失败', 'error');
+            }
+        }
+        
+        // 关闭锁详情弹窗
+        document.getElementById('closeDetailModal').addEventListener('click', () => {
+            document.getElementById('lockDetailModal').style.display = 'none';
+        });
+        
+        // 点击弹窗外部关闭
+        document.getElementById('lockDetailModal').addEventListener('click', (e) => {
+            if (e.target.id === 'lockDetailModal') {
+                document.getElementById('lockDetailModal').style.display = 'none';
+            }
+        });
         
         // 释放锁
         async function killLock(threadId) {

@@ -496,7 +496,13 @@ app.get('/api/locks', async (req, res) => {
         trxState: transaction ? transaction.TRX_STATE : null,
         processTime: process ? process.TIME : 0,
         hasTransaction: !!transaction,
-        threadMapping: !!threadMapping
+        threadMapping: !!threadMapping,
+        sql: process ? process.INFO : null,  // 添加执行的SQL语句
+        user: process ? process.USER : null, // 添加用户信息
+        host: process ? process.HOST : null, // 添加主机信息
+        db: process ? process.DB : null, // 添加数据库信息
+        command: process ? process.COMMAND : null, // 添加命令类型
+        state: process ? process.STATE : null // 添加进程状态
       };
     });
 
