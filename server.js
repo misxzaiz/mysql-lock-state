@@ -201,6 +201,90 @@ app.delete('/api/connections/:connectionId', async (req, res) => {
   }
 });
 
+// 强制释放锁操作
+app.post('/api/operations/kill-process', async (req, res) => {
+  try {
+    const { connectionId, threadId, type = 'connection' } = req.body;
+    
+    if (!connectionId || !threadId) {
+      return res.status(400).json({ 
+        error: '参数不完整', 
+        message: '请提供connectionId和threadId' 
+      });
+    }
+    
+    const connectionInfo = connectionPools.get(connectionId);
+    if (!connectionInfo) {
+      return res.status(404).json({ 
+        error: '连接不存在' 
+      });
+    }
+    
+    const connection = await connectionInfo.pool.getConnection();
+    
+    try {
+      // 通过performance_schema.threads映射THREAD_ID到PROCESSLIST_ID
+      const [threadMapping] = await connection.execute(`
+        SELECT PROCESSLIST_ID 
+        FROM performance_schema.threads 
+        WHERE THREAD_ID = ?
+      `, [threadId]);
+      
+      if (threadMapping.length === 0) {
+        return res.status(404).json({ 
+          error: '线程不存在', 
+          message: `无法找到THREAD_ID ${threadId} 对应的进程` 
+        });
+      }
+      
+      const processlistId = threadMapping[0].PROCESSLIST_ID;
+      
+      // 验证进程是否仍然存在
+      const [processCheck] = await connection.execute(`
+        SELECT ID 
+        FROM information_schema.PROCESSLIST 
+        WHERE ID = ?
+      `, [processlistId]);
+      
+      if (processCheck.length === 0) {
+        return res.status(404).json({ 
+          error: '进程已结束', 
+          message: `PROCESSLIST_ID ${processlistId} 已不存在，可能已经自动结束` 
+        });
+      }
+      
+      // 执行KILL命令
+      const killCommand = type === 'connection' ? `KILL ${processlistId}` : `KILL QUERY ${processlistId}`;
+      await connection.execute(killCommand);
+      
+      console.log(`执行操作: ${killCommand} (连接: ${connectionId}, THREAD_ID: ${threadId} -> PROCESSLIST_ID: ${processlistId})`);
+      
+      res.json({ 
+        success: true,
+        message: `✅ 强制释放锁成功!\n\n执行操作: ${type === 'connection' ? 'KILL CONNECTION' : 'KILL QUERY'}\n线程映射: THREAD_ID ${threadId} → PROCESSLIST_ID ${processlistId}\n\n所有相关锁已被强制释放，事务已回滚。`,
+        threadId,
+        processlistId,
+        type
+      });
+      
+    } catch (error) {
+      res.status(500).json({ 
+        error: 'Kill操作失败', 
+        message: error.message 
+      });
+    } finally {
+      connection.release();
+    }
+    
+  } catch (error) {
+    console.error('Kill进程操作失败:', error);
+    res.status(500).json({ 
+      error: '操作失败', 
+      message: error.message 
+    });
+  }
+});
+
 // 获取连接状态
 app.get('/api/connections/:connectionId/status', async (req, res) => {
   try {
