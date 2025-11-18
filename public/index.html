@@ -1,0 +1,1838 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MySQL锁状态监控工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+        
+        .header p {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        
+        .connection-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .connection-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .form-group label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #555;
+            margin-bottom: 6px;
+        }
+        
+        .form-group input {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52,152,219,0.1);
+        }
+        
+        .form-group select {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group select:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52,152,219,0.1);
+        }
+        
+        .connection-selector {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            margin-bottom: 16px;
+        }
+        
+        .connection-selector .form-group {
+            flex: 1;
+            max-width: 300px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #7f8c8d;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .close-btn:hover {
+            color: #2c3e50;
+        }
+        
+        .connection-list {
+            margin-top: 20px;
+        }
+        
+        .connection-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+        
+        .connection-item:hover {
+            background: #e8f4f8;
+        }
+        
+        .connection-info {
+            flex: 1;
+        }
+        
+        .connection-name {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 4px;
+        }
+        
+        .connection-details {
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        
+        .connection-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        .status-bar {
+            background: white;
+            border-radius: 8px;
+            padding: 16px 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #95a5a6;
+        }
+        
+        .status-dot.connected {
+            background: #27ae60;
+        }
+        
+        .status-dot.error {
+            background: #e74c3c;
+        }
+        
+        .status-text {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .status-stats {
+            display: flex;
+            gap: 32px;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: #2c3e50;
+            display: block;
+        }
+        
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 20px;
+        }
+        
+        .locks-section {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .view-controls {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .view-btn {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .view-btn.active {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+        
+        .locks-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        
+        .locks-table th,
+        .locks-table td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+            vertical-align: top;
+        }
+        
+        .locks-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #555;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .locks-table tbody tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .transaction-group {
+            border-left: 3px solid #3498db;
+            background: #f8f9fa;
+        }
+        
+        .transaction-group:hover {
+            background: #e8f4f8;
+        }
+        
+        .lock-type {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 500;
+            color: white;
+            white-space: nowrap;
+        }
+        
+        .lock-type.table {
+            background: #e74c3c;
+        }
+        
+        .lock-type.record {
+            background: #3498db;
+        }
+        
+        .lock-type.gap {
+            background: #f39c12;
+        }
+        
+        .lock-type.insert {
+            background: #27ae60;
+        }
+        
+        .lock-status {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .lock-status.granted {
+            background: #d5f4e6;
+            color: #27ae60;
+        }
+        
+        .lock-status.waiting {
+            background: #fef9e7;
+            color: #f39c12;
+        }
+        
+        .lock-duration {
+            font-weight: 500;
+            font-size: 11px;
+        }
+        
+        .lock-duration.warning {
+            color: #f39c12;
+        }
+        
+        .lock-duration.danger {
+            color: #e74c3c;
+        }
+        
+        .transaction-id {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            background: #ecf0f1;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        
+        .thread-id {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #7f8c8d;
+        }
+        
+        .object-name {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .lock-data {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #7f8c8d;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .description {
+            font-size: 11px;
+            color: #555;
+            line-height: 1.3;
+            max-width: 200px;
+        }
+        
+        .action-cell {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .stats-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .stats-panel h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 16px;
+        }
+        
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        .stat-row:last-child {
+            border-bottom: none;
+        }
+        
+        .stat-label {
+            font-size: 13px;
+            color: #555;
+        }
+        
+        .stat-value-small {
+            font-size: 14px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .waiting-chains {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .waiting-chains h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 16px;
+        }
+        
+        .chain-item {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        
+        .chain-arrow {
+            color: #f39c12;
+            font-weight: bold;
+            margin: 0 4px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+        
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        
+        .empty-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        
+        .empty-description {
+            font-size: 14px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        
+        .spinner {
+            border: 2px solid #ecf0f1;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        
+        .alert-success {
+            background: #d5f4e6;
+            color: #27ae60;
+            border: 1px solid #27ae60;
+        }
+        
+        .alert-error {
+            background: #fdf2f2;
+            color: #e74c3c;
+            border: 1px solid #e74c3c;
+        }
+        
+        .alert-warning {
+            background: #fef9e7;
+            color: #f39c12;
+            border: 1px solid #f39c12;
+        }
+        
+        .tooltip {
+            position: relative;
+            cursor: help;
+        }
+        
+        .tooltip:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            z-index: 1000;
+        }
+        
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .sidebar {
+                grid-row: 1;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 12px;
+            }
+            
+            .connection-form {
+                grid-template-columns: 1fr;
+            }
+            
+            .status-bar {
+                flex-direction: column;
+                gap: 16px;
+            }
+            
+            .status-stats {
+                width: 100%;
+                justify-content: space-around;
+            }
+            
+            .locks-table {
+                font-size: 11px;
+            }
+            
+            .locks-table th,
+            .locks-table td {
+                padding: 6px 4px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        
+        <div class="connection-panel">
+            <h3 style="margin-bottom: 16px; color: #2c3e50;">数据库连接</h3>
+            
+            <div class="connection-selector">
+                <div class="form-group">
+                    <label for="connectionSelect">选择连接</label>
+                    <select id="connectionSelect">
+                        <option value="">选择连接...</option>
+                    </select>
+                </div>
+                <button class="btn btn-secondary" id="manageBtn">管理配置</button>
+            </div>
+            
+
+            <div class="button-group">
+                <button class="btn btn-primary" id="connectBtn">连接数据库</button>
+                <button class="btn btn-secondary" id="disconnectBtn" style="display: none;">断开连接</button>
+                <button class="btn btn-secondary" id="refreshBtn" disabled>刷新</button>
+            </div>
+            <div id="alertContainer"></div>
+        </div>
+        
+        <!-- 连接管理弹窗 -->
+        <div class="modal" id="connectionModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">连接配置管理</h3>
+                    <button class="close-btn" id="closeModal">&times;</button>
+                </div>
+                
+                <form id="newConnectionForm">
+                    <h4 style="margin-bottom: 16px; color: #2c3e50;">添加新连接</h4>
+                    <div class="connection-form">
+                        <div class="form-group">
+                            <label for="connName">连接名称</label>
+                            <input type="text" id="connName" placeholder="例如: 开发环境" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newHost">主机地址</label>
+                            <input type="text" id="newHost" value="localhost" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newPort">端口</label>
+                            <input type="number" id="newPort" value="3306" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newUser">用户名</label>
+                            <input type="text" id="newUser" value="root" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newPassword">密码</label>
+                            <input type="password" id="newPassword" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newDatabase">数据库</label>
+                            <input type="text" id="newDatabase" value="performance_schema" required>
+                        </div>
+                    </div>
+                    <div class="button-group">
+                        <button type="submit" class="btn btn-primary">保存连接</button>
+                        <button type="button" class="btn btn-secondary" id="testConnectionBtn">测试连接</button>
+                    </div>
+                </form>
+                
+                <div class="connection-list">
+                    <h4 style="margin-bottom: 16px; color: #2c3e50;">已保存的连接</h4>
+                    <div id="savedConnections"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span class="status-text" id="statusText">未连接</span>
+            </div>
+            <div class="status-stats">
+                <div class="stat-item">
+                    <span class="stat-value" id="lockCount">0</span>
+                    <span class="stat-label">锁数量</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="transactionCount">0</span>
+                    <span class="stat-label">事务数</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="waitCount">0</span>
+                    <span class="stat-label">等待关系</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="lastUpdate">-</span>
+                    <span class="stat-label">最后更新</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div class="locks-section">
+                <div class="section-header">
+                    <h3 class="section-title">锁状态详情</h3>
+                    <div class="view-controls">
+                        <button class="view-btn active" data-view="all">全部</button>
+                        <button class="view-btn" data-view="waiting">等待中</button>
+                        <button class="view-btn" data-view="long">长期占用</button>
+                    </div>
+                </div>
+                
+                <div class="loading" id="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <div>正在加载锁信息...</div>
+                </div>
+                
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-icon">Lock</div>
+                    <div class="empty-title">暂无锁信息</div>
+                    <div class="empty-description">请先连接到MySQL数据库，然后刷新查看锁状态</div>
+                </div>
+                
+                <div id="locksContent" style="display: none;">
+                    <table class="locks-table">
+                        <thead>
+                            <tr>
+                                <th>事务ID</th>
+                                <th>线程ID</th>
+                                <th>锁类型</th>
+                                <th>对象</th>
+                                <th>索引</th>
+                                <th>锁模式</th>
+                                <th>状态</th>
+                                <th>锁数据</th>
+                                <th>描述</th>
+                                <th>占用时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="locksTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="sidebar">
+                <div class="stats-panel">
+                    <h3>锁类型统计</h3>
+                    <div class="stat-row">
+                        <span class="stat-label">表锁</span>
+                        <span class="stat-value-small" id="tableLockCount">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">行锁</span>
+                        <span class="stat-value-small" id="recordLockCount">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">间隙锁</span>
+                        <span class="stat-value-small" id="gapLockCount">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">插入意向锁</span>
+                        <span class="stat-value-small" id="insertLockCount">0</span>
+                    </div>
+                </div>
+                
+                <div class="stats-panel">
+                    <h3>时间统计</h3>
+                    <div class="stat-row">
+                        <span class="stat-label">平均占用时间</span>
+                        <span class="stat-value-small" id="avgDuration">0s</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">最长占用时间</span>
+                        <span class="stat-value-small" id="maxDuration">0s</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">长期占用(&gt;30s)</span>
+                        <span class="stat-value-small" id="longLockCount">0</span>
+                    </div>
+                </div>
+                
+                <div class="waiting-chains">
+                    <h3>等待关系链</h3>
+                    <div id="waitingChains">
+                        <div style="text-align: center; color: #7f8c8d; padding: 20px;">
+                            暂无等待关系
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 全局变量
+        let currentConnectionId = null;
+        let refreshInterval = null;
+        let currentView = 'all';
+        let locksData = [];
+        let lockWaitsData = [];
+        
+        // 连接配置管理
+        const ConnectionManager = {
+            STORAGE_KEY: 'mysql-connections',
+            CURRENT_CONNECTION_KEY: 'mysql-current-connection',
+            
+            // 获取所有连接配置
+            getConnections() {
+                const stored = localStorage.getItem(this.STORAGE_KEY);
+                return stored ? JSON.parse(stored) : [];
+            },
+            
+            // 保存连接配置
+            saveConnections(connections) {
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(connections));
+            },
+            
+            // 添加连接
+            addConnection(connection) {
+                const connections = this.getConnections();
+                const newConnection = {
+                    id: this.generateId(),
+                    name: connection.name,
+                    host: connection.host,
+                    port: connection.port,
+                    user: connection.user,
+                    password: this.encodePassword(connection.password),
+                    database: connection.database,
+                    createdAt: new Date().toISOString(),
+                    lastUsed: null,
+                    isDefault: false
+                };
+                connections.push(newConnection);
+                this.saveConnections(connections);
+                return newConnection;
+            },
+            
+            // 更新连接
+            updateConnection(id, updates) {
+                const connections = this.getConnections();
+                const index = connections.findIndex(conn => conn.id === id);
+                if (index !== -1) {
+                    connections[index] = { ...connections[index], ...updates };
+                    this.saveConnections(connections);
+                    return connections[index];
+                }
+                return null;
+            },
+            
+            // 删除连接
+            deleteConnection(id) {
+                const connections = this.getConnections();
+                const filtered = connections.filter(conn => conn.id !== id);
+                this.saveConnections(filtered);
+                return filtered.length < connections.length;
+            },
+            
+            // 获取当前连接ID
+            getCurrentConnectionId() {
+                return localStorage.getItem(this.CURRENT_CONNECTION_KEY);
+            },
+            
+            // 设置当前连接ID
+            setCurrentConnectionId(id) {
+                localStorage.setItem(this.CURRENT_CONNECTION_KEY, id);
+            },
+            
+            // 密码编码
+            encodePassword(password) {
+                return btoa(password);
+            },
+            
+            // 密码解码
+            decodePassword(encodedPassword) {
+                try {
+                    return atob(encodedPassword);
+                } catch (e) {
+                    return '';
+                }
+            },
+            
+            // 生成唯一ID
+            generateId() {
+                return 'conn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            },
+            
+            // 更新连接使用时间
+            updateLastUsed(id) {
+                this.updateConnection(id, { lastUsed: new Date().toISOString() });
+            }
+        };
+        
+        // DOM 元素
+        const elements = {
+            connectionForm: document.getElementById('connectionForm'),
+            connectBtn: document.getElementById('connectBtn'),
+            disconnectBtn: document.getElementById('disconnectBtn'),
+            refreshBtn: document.getElementById('refreshBtn'),
+            connectionSelect: document.getElementById('connectionSelect'),
+            manageBtn: document.getElementById('manageBtn'),
+            connectionModal: document.getElementById('connectionModal'),
+            closeModal: document.getElementById('closeModal'),
+            newConnectionForm: document.getElementById('newConnectionForm'),
+            testConnectionBtn: document.getElementById('testConnectionBtn'),
+            savedConnections: document.getElementById('savedConnections'),
+            statusDot: document.getElementById('statusDot'),
+            statusText: document.getElementById('statusText'),
+            lockCount: document.getElementById('lockCount'),
+            transactionCount: document.getElementById('transactionCount'),
+            waitCount: document.getElementById('waitCount'),
+            lastUpdate: document.getElementById('lastUpdate'),
+            loading: document.getElementById('loading'),
+            emptyState: document.getElementById('emptyState'),
+            locksContent: document.getElementById('locksContent'),
+            locksTableBody: document.getElementById('locksTableBody'),
+            alertContainer: document.getElementById('alertContainer'),
+            tableLockCount: document.getElementById('tableLockCount'),
+            recordLockCount: document.getElementById('recordLockCount'),
+            gapLockCount: document.getElementById('gapLockCount'),
+            insertLockCount: document.getElementById('insertLockCount'),
+            avgDuration: document.getElementById('avgDuration'),
+            maxDuration: document.getElementById('maxDuration'),
+            longLockCount: document.getElementById('longLockCount'),
+            waitingChains: document.getElementById('waitingChains')
+        };
+        
+        // 初始化
+        function init() {
+            loadConnections();
+            setupEventListeners();
+            restoreLastConnection();
+        }
+        
+        // 加载连接配置
+        function loadConnections() {
+            const connections = ConnectionManager.getConnections();
+            const currentConnectionId = ConnectionManager.getCurrentConnectionId();
+            
+            // 清空下拉框
+            elements.connectionSelect.innerHTML = '<option value="">选择连接...</option>';
+            
+            // 添加连接选项
+            connections.forEach(conn => {
+                const option = document.createElement('option');
+                option.value = conn.id;
+                option.textContent = `${conn.name} (${conn.host}:${conn.port})`;
+                if (conn.id === currentConnectionId) {
+                    option.selected = true;
+                }
+                elements.connectionSelect.appendChild(option);
+            });
+            
+            // 如果有当前连接，自动填充表单
+            if (currentConnectionId) {
+                const currentConn = connections.find(conn => conn.id === currentConnectionId);
+                if (currentConn) {
+                    fillConnectionForm(currentConn);
+                }
+            }
+            
+            updateConnectionsList();
+        }
+        
+        // 填充连接表单
+        function fillConnectionForm(connection) {
+            // 只有在表单元素存在时才填充值
+            const hostEl = document.getElementById('host');
+            const portEl = document.getElementById('port');
+            const userEl = document.getElementById('user');
+            const passwordEl = document.getElementById('password');
+            const databaseEl = document.getElementById('database');
+            
+            if (hostEl) hostEl.value = connection.host;
+            if (portEl) portEl.value = connection.port;
+            if (userEl) userEl.value = connection.user;
+            if (passwordEl) passwordEl.value = ConnectionManager.decodePassword(connection.password);
+            if (databaseEl) databaseEl.value = connection.database;
+        }
+        
+        // 更新连接列表
+        function updateConnectionsList() {
+            const connections = ConnectionManager.getConnections();
+            elements.savedConnections.innerHTML = '';
+            
+            if (connections.length === 0) {
+                elements.savedConnections.innerHTML = '<div style="text-align: center; color: #7f8c8d; padding: 20px;">暂无保存的连接</div>';
+                return;
+            }
+            
+            connections.forEach(conn => {
+                const connItem = document.createElement('div');
+                connItem.className = 'connection-item';
+                
+                const lastUsedText = conn.lastUsed ? 
+                    new Date(conn.lastUsed).toLocaleString() : '从未使用';
+                
+                connItem.innerHTML = `
+                    <div class="connection-info">
+                        <div class="connection-name">${conn.name}</div>
+                        <div class="connection-details">
+                            ${conn.host}:${conn.port}/${conn.database} (用户: ${conn.user})
+                        </div>
+                        <div class="connection-details">最后使用: ${lastUsedText}</div>
+                    </div>
+                    <div class="connection-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="editConnection('${conn.id}')">编辑</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteConnection('${conn.id}')">删除</button>
+                    </div>
+                `;
+                
+                elements.savedConnections.appendChild(connItem);
+            });
+        }
+        
+        // 设置事件监听器
+        function setupEventListeners() {
+            elements.connectBtn.addEventListener('click', connectToDatabase);
+        elements.disconnectBtn.addEventListener('click', disconnectFromDatabase);
+        
+        // 初始化连接按钮状态
+        elements.connectBtn.disabled = !elements.connectionSelect.value;
+            elements.refreshBtn.addEventListener('click', loadLocks);
+            elements.manageBtn.addEventListener('click', () => {
+                elements.connectionModal.style.display = 'flex';
+            });
+            elements.closeModal.addEventListener('click', () => {
+                elements.connectionModal.style.display = 'none';
+            });
+            
+            // 连接选择变化
+            elements.connectionSelect.addEventListener('change', (e) => {
+            const connectionId = e.target.value;
+            const hasSelection = connectionId !== '';
+            
+            // 控制连接按钮状态
+            elements.connectBtn.disabled = !hasSelection;
+            
+            if (connectionId) {
+                const connections = ConnectionManager.getConnections();
+                const connection = connections.find(conn => conn.id === connectionId);
+                if (connection) {
+                    fillConnectionForm(connection);
+                }
+            }
+        });
+            
+            // 新连接表单提交
+            elements.newConnectionForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                saveNewConnection();
+            });
+            
+            // 测试连接
+            elements.testConnectionBtn.addEventListener('click', testNewConnection);
+            
+            elements.connectionForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                connectToDatabase();
+            });
+            
+            // 点击模态框外部关闭
+            elements.connectionModal.addEventListener('click', (e) => {
+                if (e.target === elements.connectionModal) {
+                    elements.connectionModal.style.display = 'none';
+                }
+            });
+            
+            // 视图控制
+            document.querySelectorAll('.view-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentView = btn.dataset.view;
+                    displayLocks();
+                });
+            });
+        }
+        
+        // 恢复上次连接
+        function restoreLastConnection() {
+            const currentConnectionId = ConnectionManager.getCurrentConnectionId();
+            if (currentConnectionId) {
+                elements.connectionSelect.value = currentConnectionId;
+            }
+        }
+        
+        // 保存新连接
+        function saveNewConnection() {
+            const connection = {
+                name: document.getElementById('connName').value,
+                host: document.getElementById('newHost').value,
+                port: parseInt(document.getElementById('newPort').value),
+                user: document.getElementById('newUser').value,
+                password: document.getElementById('newPassword').value,
+                database: document.getElementById('newDatabase').value
+            };
+            
+            try {
+                const newConnection = ConnectionManager.addConnection(connection);
+                showAlert('连接配置已保存', 'success');
+                
+                // 清空表单
+                elements.newConnectionForm.reset();
+                document.getElementById('newHost').value = 'localhost';
+                document.getElementById('newPort').value = '3306';
+                document.getElementById('newUser').value = 'root';
+                document.getElementById('newDatabase').value = 'performance_schema';
+                
+                // 重新加载连接列表
+                loadConnections();
+            } catch (error) {
+                showAlert(`保存失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 测试新连接
+        async function testNewConnection() {
+            const config = {
+                host: document.getElementById('newHost').value,
+                port: parseInt(document.getElementById('newPort').value),
+                user: document.getElementById('newUser').value,
+                password: document.getElementById('newPassword').value,
+                database: document.getElementById('newDatabase').value
+            };
+            
+            elements.testConnectionBtn.disabled = true;
+            elements.testConnectionBtn.textContent = '测试中...';
+            
+            try {
+                const response = await fetch('/api/connections', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // 测试成功，立即断开
+                    try {
+                        await fetch(`/api/connections/${result.connectionId}`, {
+                            method: 'DELETE'
+                        });
+                    } catch (e) {
+                        // 忽略断开错误
+                    }
+                    
+                    showAlert('连接测试成功', 'success');
+                } else {
+                    showAlert(`连接测试失败: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`连接测试失败: ${error.message}`, 'error');
+            } finally {
+                elements.testConnectionBtn.disabled = false;
+                elements.testConnectionBtn.textContent = '测试连接';
+            }
+        }
+        
+        // 编辑连接
+        function editConnection(id) {
+            const connections = ConnectionManager.getConnections();
+            const connection = connections.find(conn => conn.id === id);
+            
+            if (connection) {
+                document.getElementById('connName').value = connection.name;
+                document.getElementById('newHost').value = connection.host;
+                document.getElementById('newPort').value = connection.port;
+                document.getElementById('newUser').value = connection.user;
+                document.getElementById('newPassword').value = ConnectionManager.decodePassword(connection.password);
+                document.getElementById('newDatabase').value = connection.database;
+                
+                // 修改表单提交行为为更新
+                elements.newConnectionForm.onsubmit = (e) => {
+                    e.preventDefault();
+                    updateConnection(id);
+                };
+                
+                elements.connectionModal.style.display = 'flex';
+            }
+        }
+        
+        // 更新连接
+        function updateConnection(id) {
+            const updates = {
+                name: document.getElementById('connName').value,
+                host: document.getElementById('newHost').value,
+                port: parseInt(document.getElementById('newPort').value),
+                user: document.getElementById('newUser').value,
+                password: ConnectionManager.encodePassword(document.getElementById('newPassword').value),
+                database: document.getElementById('newDatabase').value
+            };
+            
+            try {
+                ConnectionManager.updateConnection(id, updates);
+                showAlert('连接配置已更新', 'success');
+                
+                // 清空表单
+                elements.newConnectionForm.reset();
+                document.getElementById('newHost').value = 'localhost';
+                document.getElementById('newPort').value = '3306';
+                document.getElementById('newUser').value = 'root';
+                document.getElementById('newDatabase').value = 'performance_schema';
+                
+                // 恢复表单提交行为为新增
+                elements.newConnectionForm.onsubmit = (e) => {
+                    e.preventDefault();
+                    saveNewConnection();
+                };
+                
+                // 重新加载连接列表
+                loadConnections();
+                
+                // 关闭弹窗
+                elements.connectionModal.style.display = 'none';
+            } catch (error) {
+                showAlert(`更新失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 删除连接
+        function deleteConnection(id) {
+            if (!confirm('确定要删除这个连接配置吗？')) return;
+            
+            try {
+                const success = ConnectionManager.deleteConnection(id);
+                if (success) {
+                    showAlert('连接配置已删除', 'success');
+                    
+                    // 如果删除的是当前连接，清除选择
+                    if (ConnectionManager.getCurrentConnectionId() === id) {
+                        ConnectionManager.setCurrentConnectionId('');
+                        elements.connectionSelect.value = '';
+                    }
+                    
+                    // 重新加载连接列表
+                    loadConnections();
+                } else {
+                    showAlert('删除失败', 'error');
+                }
+            } catch (error) {
+                showAlert(`删除失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 连接数据库
+        async function connectToDatabase() {
+            // 获取当前选择的连接ID
+            const selectedConnectionId = elements.connectionSelect.value;
+            
+            // 必须选择一个已保存的连接
+            if (!selectedConnectionId) {
+                showAlert('请先选择一个已保存的连接配置', 'error');
+                return;
+            }
+            
+            // 从已保存的连接配置中获取参数
+            const connection = ConnectionManager.getConnections().find(conn => conn.id === selectedConnectionId);
+            if (!connection) {
+                showAlert('选择的连接配置不存在', 'error');
+                return;
+            }
+            
+            const config = {
+                host: connection.host,
+                port: connection.port,
+                user: connection.user,
+                password: ConnectionManager.decodePassword(connection.password),
+                database: connection.database
+            };
+            
+            // 保存当前选择的连接ID
+            ConnectionManager.setCurrentConnectionId(selectedConnectionId);
+            ConnectionManager.updateLastUsed(selectedConnectionId);
+            
+            elements.connectBtn.disabled = true;
+            elements.connectBtn.textContent = '连接中...';
+            clearAlerts();
+            
+            try {
+                const response = await fetch('/api/connections', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    currentConnectionId = result.connectionId;
+                    showAlert('连接成功', 'success');
+                    updateConnectionStatus(true);
+                    loadLocks();
+                    startAutoRefresh();
+                } else {
+                    showAlert(`连接失败: ${result.message}`, 'error');
+                    updateConnectionStatus(false);
+                }
+            } catch (error) {
+                showAlert(`连接失败: ${error.message}`, 'error');
+                updateConnectionStatus(false);
+            } finally {
+                elements.connectBtn.disabled = false;
+                elements.connectBtn.textContent = '连接数据库';
+            }
+        }
+        
+        // 断开数据库连接
+        async function disconnectFromDatabase() {
+            if (!currentConnectionId) return;
+            
+            try {
+                const response = await fetch(`/api/connections/${currentConnectionId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showAlert('连接已断开', 'success');
+                    currentConnectionId = null;
+                    updateConnectionStatus(false);
+                    stopAutoRefresh();
+                    resetDisplay();
+                } else {
+                    showAlert('断开连接失败', 'error');
+                }
+            } catch (error) {
+                showAlert(`断开连接失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 加载锁信息
+        async function loadLocks() {
+            if (!currentConnectionId) return;
+            
+            elements.loading.style.display = 'block';
+            elements.emptyState.style.display = 'none';
+            elements.locksContent.style.display = 'none';
+            
+            try {
+                const response = await fetch(`/api/locks?connectionId=${currentConnectionId}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    locksData = data.locks || [];
+                    lockWaitsData = data.lockWaits || [];
+                    displayLocks();
+                    updateStatistics();
+                    updateWaitingChains();
+                    updateLastUpdate();
+                } else {
+                    showAlert(`获取锁信息失败: ${data.message}`, 'error');
+                    showEmptyState();
+                }
+            } catch (error) {
+                showAlert(`获取锁信息失败: ${error.message}`, 'error');
+                showEmptyState();
+            } finally {
+                elements.loading.style.display = 'none';
+            }
+        }
+        
+        // 显示锁信息
+        function displayLocks() {
+            let filteredLocks = filterLocks(locksData);
+            
+            elements.lockCount.textContent = locksData.length;
+            elements.waitCount.textContent = lockWaitsData.length;
+            
+            if (filteredLocks.length === 0) {
+                showEmptyState();
+                return;
+            }
+            
+            elements.emptyState.style.display = 'none';
+            elements.locksContent.style.display = 'block';
+            
+            elements.locksTableBody.innerHTML = '';
+            
+            // 按事务分组
+            const groupedLocks = groupLocksByTransaction(filteredLocks);
+            
+            Object.keys(groupedLocks).forEach(transactionId => {
+                const locks = groupedLocks[transactionId];
+                locks.forEach((lock, index) => {
+                    const row = createLockRow(lock, index === 0);
+                    elements.locksTableBody.appendChild(row);
+                });
+            });
+        }
+        
+        // 过滤锁信息
+        function filterLocks(locks) {
+            switch (currentView) {
+                case 'waiting':
+                    return locks.filter(lock => lock.LOCK_STATUS === 'WAITING');
+                case 'long':
+                    return locks.filter(lock => lock.lockDuration > 30);
+                default:
+                    return locks;
+            }
+        }
+        
+        // 按事务分组锁
+        function groupLocksByTransaction(locks) {
+            const groups = {};
+            locks.forEach(lock => {
+                const transactionId = lock.ENGINE_TRANSACTION_ID || 'unknown';
+                if (!groups[transactionId]) {
+                    groups[transactionId] = [];
+                }
+                groups[transactionId].push(lock);
+            });
+            
+            // 按事务ID排序
+            const sortedGroups = {};
+            Object.keys(groups).sort().forEach(key => {
+                sortedGroups[key] = groups[key];
+            });
+            
+            return sortedGroups;
+        }
+        
+        // 创建锁表格行
+        function createLockRow(lock, isFirstInTransaction) {
+            const row = document.createElement('tr');
+            const range = lock.lockRange;
+            
+            // 事务分组样式
+            if (isFirstInTransaction && lock.ENGINE_TRANSACTION_ID) {
+                row.classList.add('transaction-group');
+            }
+            
+            // 锁类型
+            const lockTypeClass = range.type.toLowerCase().replace('_', '');
+            const lockTypeLabel = {
+                'TABLE_LOCK': '表锁',
+                'RECORD_LOCK': '行锁',
+                'GAP_LOCK': '间隙锁',
+                'INSERT_INTENTION_LOCK': '插入意向锁'
+            }[range.type] || range.type;
+            
+            // 状态
+            const statusClass = lock.LOCK_STATUS.toLowerCase() === 'granted' ? 'granted' : 'waiting';
+            const statusText = lock.LOCK_STATUS === 'GRANTED' ? '已授予' : '等待中';
+            
+            // 占用时间格式化
+            const durationText = formatDuration(lock.lockDuration);
+            let durationClass = '';
+            if (lock.lockDuration > 30) {
+                durationClass = 'danger';
+            } else if (lock.lockDuration > 10) {
+                durationClass = 'warning';
+            }
+            
+            // 事务ID（只在第一个锁显示）
+            const transactionId = isFirstInTransaction ? 
+                `<span class="transaction-id">${lock.ENGINE_TRANSACTION_ID || 'N/A'}</span>` : 
+                '<span style="color: transparent;">-</span>';
+            
+            row.innerHTML = `
+                <td>${transactionId}</td>
+                <td><span class="thread-id">${lock.THREAD_ID}</span></td>
+                <td><span class="lock-type ${lockTypeClass}">${lockTypeLabel}</span></td>
+                <td><span class="object-name">${lock.OBJECT_SCHEMA}.${lock.OBJECT_NAME}</span></td>
+                <td>${lock.INDEX_NAME || '-'}</td>
+                <td>${range.mode || lock.LOCK_MODE}</td>
+                <td><span class="lock-status ${statusClass}">${statusText}</span></td>
+                <td><span class="lock-data tooltip" data-tooltip="${lock.LOCK_DATA || '-'}">${lock.LOCK_DATA || '-'}</span></td>
+                <td><span class="description">${range.description}</span></td>
+                <td><span class="lock-duration ${durationClass}">${durationText}</span></td>
+                <td class="action-cell">
+                    <button class="btn btn-danger btn-sm" onclick="killLock('${lock.THREAD_ID}')">释放</button>
+                </td>
+            `;
+            
+            return row;
+        }
+        
+        // 格式化持续时间
+        function formatDuration(seconds) {
+            if (seconds < 60) {
+                return `${seconds}s`;
+            } else if (seconds < 3600) {
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                return `${minutes}m${remainingSeconds}s`;
+            } else {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                return `${hours}h${minutes}m`;
+            }
+        }
+        
+        // 更新统计信息
+        function updateStatistics() {
+            const stats = calculateStatistics(locksData);
+            
+            elements.transactionCount.textContent = stats.transactionCount;
+            elements.tableLockCount.textContent = stats.tableLockCount;
+            elements.recordLockCount.textContent = stats.recordLockCount;
+            elements.gapLockCount.textContent = stats.gapLockCount;
+            elements.insertLockCount.textContent = stats.insertLockCount;
+            elements.avgDuration.textContent = formatDuration(stats.avgDuration);
+            elements.maxDuration.textContent = formatDuration(stats.maxDuration);
+            elements.longLockCount.textContent = stats.longLockCount;
+        }
+        
+        // 计算统计信息
+        function calculateStatistics(locks) {
+            const transactionIds = new Set();
+            let totalDuration = 0;
+            let maxDuration = 0;
+            let longLockCount = 0;
+            
+            const lockTypeCounts = {
+                'TABLE_LOCK': 0,
+                'RECORD_LOCK': 0,
+                'GAP_LOCK': 0,
+                'INSERT_INTENTION_LOCK': 0
+            };
+            
+            locks.forEach(lock => {
+                // 事务统计
+                if (lock.ENGINE_TRANSACTION_ID) {
+                    transactionIds.add(lock.ENGINE_TRANSACTION_ID);
+                }
+                
+                // 时间统计
+                totalDuration += lock.lockDuration || 0;
+                maxDuration = Math.max(maxDuration, lock.lockDuration || 0);
+                if (lock.lockDuration > 30) {
+                    longLockCount++;
+                }
+                
+                // 锁类型统计
+                const lockType = lock.lockRange?.type;
+                if (lockTypeCounts.hasOwnProperty(lockType)) {
+                    lockTypeCounts[lockType]++;
+                }
+            });
+            
+            const avgDuration = locks.length > 0 ? Math.floor(totalDuration / locks.length) : 0;
+            
+            return {
+                transactionCount: transactionIds.size,
+                tableLockCount: lockTypeCounts['TABLE_LOCK'],
+                recordLockCount: lockTypeCounts['RECORD_LOCK'],
+                gapLockCount: lockTypeCounts['GAP_LOCK'],
+                insertLockCount: lockTypeCounts['INSERT_INTENTION_LOCK'],
+                avgDuration,
+                maxDuration,
+                longLockCount
+            };
+        }
+        
+        // 更新等待关系链
+        function updateWaitingChains() {
+            if (lockWaitsData.length === 0) {
+                elements.waitingChains.innerHTML = `
+                    <div style="text-align: center; color: #7f8c8d; padding: 20px;">
+                        暂无等待关系
+                    </div>
+                `;
+                return;
+            }
+            
+            const chains = buildWaitingChains(lockWaitsData, locksData);
+            
+            elements.waitingChains.innerHTML = chains.map(chain => `
+                <div class="chain-item">
+                    ${chain.map(item => `
+                        <span class="transaction-id">${item.transactionId}</span>
+                        <small>(${item.object})</small>
+                    `).join('<span class="chain-arrow">→</span>')}
+                </div>
+            `).join('');
+        }
+        
+        // 构建等待关系链
+        function buildWaitingChains(lockWaits, locks) {
+            const chains = [];
+            const processed = new Set();
+            
+            lockWaits.forEach(wait => {
+                const chainKey = `${wait.REQUESTING_ENGINE_TRANSACTION_ID}_${wait.BLOCKING_ENGINE_TRANSACTION_ID}`;
+                if (processed.has(chainKey)) return;
+                
+                const requestingLock = locks.find(l => l.ENGINE_TRANSACTION_ID === wait.REQUESTING_ENGINE_TRANSACTION_ID);
+                const blockingLock = locks.find(l => l.ENGINE_TRANSACTION_ID === wait.BLOCKING_ENGINE_TRANSACTION_ID);
+                
+                if (requestingLock && blockingLock) {
+                    chains.push([
+                        {
+                            transactionId: wait.REQUESTING_ENGINE_TRANSACTION_ID,
+                            object: `${requestingLock.OBJECT_SCHEMA}.${requestingLock.OBJECT_NAME}`
+                        },
+                        {
+                            transactionId: wait.BLOCKING_ENGINE_TRANSACTION_ID,
+                            object: `${blockingLock.OBJECT_SCHEMA}.${blockingLock.OBJECT_NAME}`
+                        }
+                    ]);
+                    processed.add(chainKey);
+                }
+            });
+            
+            return chains;
+        }
+        
+        // 释放锁
+        async function killLock(threadId) {
+            if (!currentConnectionId || !threadId) return;
+            
+            if (!confirm('确定要强制释放这个锁吗？这将终止相关连接并回滚事务。')) return;
+            
+            try {
+                const response = await fetch('/api/operations/kill-process', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        connectionId: currentConnectionId,
+                        threadId: threadId
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showAlert('锁释放成功', 'success');
+                    setTimeout(loadLocks, 1000);
+                } else {
+                    showAlert(`锁释放失败: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`锁释放失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 更新连接状态
+        function updateConnectionStatus(connected) {
+            if (connected) {
+                elements.statusDot.className = 'status-dot connected';
+                elements.statusText.textContent = '已连接';
+                elements.connectBtn.style.display = 'none';
+                elements.disconnectBtn.style.display = 'block';
+                elements.refreshBtn.disabled = false;
+            } else {
+                elements.statusDot.className = 'status-dot';
+                elements.statusText.textContent = '未连接';
+                elements.connectBtn.style.display = 'block';
+                elements.disconnectBtn.style.display = 'none';
+                elements.refreshBtn.disabled = true;
+            }
+        }
+        
+        // 更新最后更新时间
+        function updateLastUpdate() {
+            const now = new Date();
+            elements.lastUpdate.textContent = now.toLocaleTimeString();
+        }
+        
+        // 显示空状态
+        function showEmptyState() {
+            elements.emptyState.style.display = 'block';
+            elements.locksContent.style.display = 'none';
+            elements.lockCount.textContent = '0';
+            elements.transactionCount.textContent = '0';
+            elements.waitCount.textContent = '0';
+        }
+        
+        // 重置显示
+        function resetDisplay() {
+            showEmptyState();
+            updateStatistics();
+            updateWaitingChains();
+            elements.lastUpdate.textContent = '-';
+        }
+        
+        // 显示提示信息
+        function showAlert(message, type) {
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            
+            elements.alertContainer.appendChild(alert);
+            
+            setTimeout(() => {
+                if (alert.parentNode) {
+                    alert.parentNode.removeChild(alert);
+                }
+            }, 5000);
+        }
+        
+        // 清除提示信息
+        function clearAlerts() {
+            elements.alertContainer.innerHTML = '';
+        }
+        
+        // 开始自动刷新
+        function startAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            
+            refreshInterval = setInterval(() => {
+                if (currentConnectionId) {
+                    loadLocks();
+                }
+            }, 5000);
+        }
+        
+        // 停止自动刷新
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', init);
+        
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', () => {
+            stopAutoRefresh();
+        });
+    </script>
+</body>
+</html>

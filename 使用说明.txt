@@ -1,0 +1,30 @@
+MySQL锁状态监控工具 - 使用说明
+
+📦 重要提示：
+本工具的exe文件需要与public文件夹在同一目录才能正常运行！
+
+🚀 正确的使用方式：
+1. 将 mysql-lock-visualizer.exe 和整个 public 文件夹 放在同一目录
+2. 双击 mysql-lock-visualizer.exe 启动
+3. 浏览器访问：http://localhost:3000
+
+📁 目录结构应该是：
+your-folder/
+├── mysql-lock-visualizer.exe
+└── public/
+    └── index.html
+
+⚠️ 常见问题：
+- 如果删除public文件夹，工具将无法正常工作
+- 如果public文件夹中没有index.html，会显示404错误
+- 确保public文件夹与exe在同一级别，不要嵌套
+
+🔧 连接管理：
+- 点击"管理配置"可以添加、编辑、删除数据库连接
+- 支持保存多个连接配置，方便切换不同环境
+- 连接配置会保存在本地，下次使用时自动加载
+
+💡 使用建议：
+- 建议将整个工具文件夹（包含exe和public）一起使用
+- 可以创建桌面快捷方式指向exe文件
+- 定期备份连接配置（存储在浏览器本地）
